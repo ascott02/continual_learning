@@ -1,4 +1,5 @@
 """Generate plots and a MARP slide deck from logs/results.jsonl."""
+import argparse
 import json
 import os
 import textwrap
@@ -30,7 +31,7 @@ def rolling_mean(values: list[float], window: int) -> list[float]:
 
 # ── plots ─────────────────────────────────────────────────────────────────────
 
-def plot_accuracy(entries: list[dict], window: int = 20) -> str:
+def plot_accuracy(entries: list[dict], window: int = 100) -> str:
     iters = [e["iteration"] for e in entries]
     correct = [int(e["true_label"] == e["predicted_label"]) for e in entries]
     acc_roll = rolling_mean(correct, window)
@@ -53,7 +54,7 @@ def plot_accuracy(entries: list[dict], window: int = 20) -> str:
     return path
 
 
-def plot_confidence(entries: list[dict], window: int = 20) -> str:
+def plot_confidence(entries: list[dict], window: int = 100) -> str:
     iters = [e["iteration"] for e in entries]
     confs = [e["confidence"] for e in entries]
     conf_roll = rolling_mean(confs, window)
@@ -74,7 +75,7 @@ def plot_confidence(entries: list[dict], window: int = 20) -> str:
     return path
 
 
-def plot_loss(entries: list[dict], window: int = 20) -> str:
+def plot_loss(entries: list[dict], window: int = 100) -> str:
     iters = [e["iteration"] for e in entries]
     losses = [e["loss"] for e in entries]
     loss_roll = rolling_mean(losses, window)
@@ -158,7 +159,8 @@ def plot_label_distribution(entries: list[dict]) -> str:
 def build_report(entries: list[dict],
                  acc_path: str, conf_path: str,
                  loss_path: str, dist_path: str,
-                 per_class_path: str) -> None:
+                 per_class_path: str,
+                 window: int = 100) -> None:
     from collections import defaultdict
     n = len(entries)
     correct = sum(int(e["true_label"] == e["predicted_label"]) for e in entries)
@@ -168,12 +170,12 @@ def build_report(entries: list[dict],
     first_iter = entries[0]["iteration"]
     last_iter = entries[-1]["iteration"]
 
-    # early / late window stats (first/last 20%)
-    window = max(1, n // 5)
-    early = entries[:window]
-    late = entries[-window:]
-    early_acc = sum(int(e["true_label"] == e["predicted_label"]) for e in early) / window
-    late_acc  = sum(int(e["true_label"] == e["predicted_label"]) for e in late)  / window
+    # early / late window stats
+    w = min(window, n)
+    early = entries[:w]
+    late = entries[-w:]
+    early_acc = sum(int(e["true_label"] == e["predicted_label"]) for e in early) / w
+    late_acc  = sum(int(e["true_label"] == e["predicted_label"]) for e in late)  / w
 
     # per-class accuracy table rows
     correct_by_class: dict[int, list[int]] = defaultdict(list)
@@ -288,7 +290,7 @@ def build_report(entries: list[dict],
     ![Accuracy](accuracy.png)
 
     Overall accuracy: **{mean_acc:.1%}** &nbsp;|&nbsp;
-    First {window} iters: **{early_acc:.1%}** → Last {window} iters: **{late_acc:.1%}**
+    First {w} iters: **{early_acc:.1%}** → Last {w} iters: **{late_acc:.1%}**
 
     ---
 
@@ -335,7 +337,7 @@ def build_report(entries: list[dict],
 
     ## Key Observations
 
-    1. **Accuracy improves** from ~{early_acc:.0%} (early) to ~{late_acc:.0%} (late)
+    1. **Accuracy improves** from ~{early_acc:.0%} (first {w}) to ~{late_acc:.0%} (last {w})
        despite seeing only one new image per iteration
     2. **Re-instantiation preserves** cumulative learning —
        no weights are discarded between steps
@@ -378,7 +380,7 @@ def build_report(entries: list[dict],
 
     | Question | Answer |
     |----------|--------|
-    | Can a CNN learn from 1 image/step? | **Yes** — accuracy rises {early_acc:.0%} → {late_acc:.0%} |
+    | Can a CNN learn from 1 image/step? | **Yes** — accuracy rises {early_acc:.0%} → {late_acc:.0%} (window={w}) |
     | Does re-instantiation preserve learning? | **Yes** — checkpoint carries all state |
     | Is the experiment reproducible? | **Yes** — MD5-verified across runs |
     | What limits accuracy? | Single-sample updates + no replay |
@@ -394,17 +396,21 @@ def build_report(entries: list[dict],
 # ── main ──────────────────────────────────────────────────────────────────────
 
 def main() -> None:
-    entries = load_log(JSONL_PATH)
-    print(f"Loaded {len(entries)} log entries.")
+    parser = argparse.ArgumentParser(description="Generate report from results.jsonl")
+    parser.add_argument("--window", type=int, default=100, help="Rolling average window size")
+    args = parser.parse_args()
 
-    acc_path = plot_accuracy(entries)
-    conf_path = plot_confidence(entries)
-    loss_path = plot_loss(entries)
+    entries = load_log(JSONL_PATH)
+    print(f"Loaded {len(entries)} log entries (window={args.window}).")
+
+    acc_path = plot_accuracy(entries, window=args.window)
+    conf_path = plot_confidence(entries, window=args.window)
+    loss_path = plot_loss(entries, window=args.window)
     dist_path = plot_label_distribution(entries)
     per_class_path = plot_per_class_accuracy(entries)
 
     print(f"Plots saved: {acc_path}, {conf_path}, {loss_path}, {dist_path}, {per_class_path}")
-    build_report(entries, acc_path, conf_path, loss_path, dist_path, per_class_path)
+    build_report(entries, acc_path, conf_path, loss_path, dist_path, per_class_path, window=args.window)
 
 
 if __name__ == "__main__":
