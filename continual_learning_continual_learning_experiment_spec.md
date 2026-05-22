@@ -205,6 +205,11 @@ Acceptance: - Hash of JSONL file matches.
 -   Plot relevant data points
 -   Aggregate into a MARP markdown slide deck report
 
+## Milestone 8 -- Generate a deck
+
+-   Use the artifacts from Milestone 7 and put results in a MARP markdown slide deck
+-   Explain the setup, procedure, and results
+
 ------------------------------------------------------------------------
 
 # 10. Extension Hooks (Future Work)
