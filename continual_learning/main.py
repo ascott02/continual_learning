@@ -18,6 +18,9 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
+CHECKPOINT_PATH = "logs/checkpoint.pt"
+
+
 def main() -> None:
     args = parse_args()
 
@@ -28,19 +31,51 @@ def main() -> None:
     set_seed(args.seed)
 
     dataset = get_mnist(seed=args.seed)
+    criterion = nn.CrossEntropyLoss()
+    logs: list[dict] = []
 
-    # Milestone 3: train on first 100 samples, predict sample 101
+    # --- Bootstrap: train on first 100 samples, save checkpoint ---
     model = MiniCNN().to(device)
     optimizer = torch.optim.SGD(model.parameters(), lr=args.learning_rate)
-    criterion = nn.CrossEntropyLoss()
-
     loader = get_loader(dataset, start=0, end=100, batch_size=args.batch_size)
     train_epoch(model, loader, optimizer, criterion, device)
+    torch.save(model.state_dict(), CHECKPOINT_PATH)
 
-    img_101, true_label_101 = dataset[100]
-    pred, conf, loss = predict(model, img_101, torch.tensor(true_label_101), criterion, device)
+    # --- Iterative re-instantiation loop ---
+    for i in range(100, 100 + args.n):
+        # Re-instantiate model from last checkpoint
+        model = MiniCNN().to(device)
+        model.load_state_dict(torch.load(CHECKPOINT_PATH, map_location=device))
+        optimizer = torch.optim.SGD(model.parameters(), lr=args.learning_rate)
 
-    print(f"Sample 101 — true: {true_label_101}, predicted: {pred}, confidence: {conf:.4f}, loss: {loss:.4f}")
+        # Predict image i BEFORE training on it (use prediction as pseudo-label)
+        img_i, true_label_i = dataset[i]
+        pred_label, conf, loss = predict(
+            model, img_i, torch.tensor(true_label_i), criterion, device
+        )
+
+        # Train on single new image i only
+        loader = get_loader(dataset, start=i, end=i + 1, batch_size=args.batch_size)
+        train_epoch(model, loader, optimizer, criterion, device)
+
+        # Save updated checkpoint
+        torch.save(model.state_dict(), CHECKPOINT_PATH)
+
+        entry = {
+            "iteration": i,
+            "train_size": i + 1,
+            "true_label": int(true_label_i),
+            "predicted_label": int(pred_label),
+            "confidence": round(conf, 6),
+            "loss": round(loss, 6),
+        }
+        logs.append(entry)
+        print(
+            f"iter {i:4d} | train_size={i+1:4d} | true={true_label_i} "
+            f"pred={pred_label} conf={conf:.4f} loss={loss:.4f}"
+        )
+
+    print(f"\nDone. {len(logs)} log entries written.")
 
 
 if __name__ == "__main__":
